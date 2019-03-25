@@ -1,2 +1,2 @@
-# relation_extraction
-Combining Distant and Direct Supervision for Neural Relation Extraction
+# Combining Distant and Direct Supervision for Neural Relation Extraction
+
