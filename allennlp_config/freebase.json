@@ -1,0 +1,51 @@
+{
+  "random_seed":  std.parseInt(std.extVar("SEED")),
+  "pytorch_seed": std.parseInt(std.extVar("PYTORCH_SEED")),
+  "numpy_seed": std.parseInt(std.extVar("NUMPY_SEED")),
+  "dataset_reader": {
+    "type": "relation_instances",
+    "lazy": false,
+    "max_bag_size": std.parseInt(std.extVar("max_bag_size")),
+    "negative_exampels_percentage": std.parseInt(std.extVar("negative_exampels_percentage")),
+    "with_direct_supervision": std.extVar("with_direct_supervision")
+  },
+  "train_data_path": "data/freebase/train.txt",
+  "validation_data_path": "data/freebase/dev.txt",
+  "test_data_path": "data/freebase/test.txt",
+  "evaluate_on_test": true,
+  "model": {
+    "type": "comb_direct_dist_relex",
+    "text_field_embedder": {
+      "token_embedders": {
+        "tokens": {
+          "type": "embedding",
+          "embedding_dim": 100,
+          "pretrained_file": "https://s3-us-west-2.amazonaws.com/allennlp/datasets/glove/glove.6B.100d.txt.gz",
+          "trainable": false
+        }
+      }
+    },
+    "cnn_size": std.parseInt(std.extVar("cnn_size")),  //TODO: replace with seq_encoder
+    "dropout_weight": std.extVar("dropout_weight"),
+    "with_entity_embeddings": std.extVar("with_entity_embeddings"),
+    "sent_loss_weight": std.extVar("sent_loss_weight"),
+    "attention_weight_fn": std.extVar("attention_weight_fn"),
+    "attention_aggregation_fn": std.extVar("attention_aggregation_fn")
+  },
+  "iterator": {
+    "type": "bucket",
+    "sorting_keys": [["is_supervised_bag", "num_tokens"], ["mentions", "list_num_tokens"]],
+    "batch_size": std.parseInt(std.extVar("batch_size"))
+  },
+  "trainer": {
+    "num_epochs": 100,
+    "cuda_device": 0,
+    "grad_clipping": 5.0,
+    "patience": 3,
+    "validation_metric": "+ap",
+    "optimizer": {
+      "type": "adam",
+      "lr": 0.001
+    }
+  }
+}
