@@ -22,14 +22,16 @@ class MultilabelAveragePrecision(Metric):
     Two modes of calculating AP are implemented,
         - a fast but less accurate implementation that bins threshold. Supports the frequent use of get_metrics
         - a more accurate implemenatition when get_metrics(reset=True)
-    The fast one tends of underestimate AP.
+    The fast one tends to underestimate AP.
     AP - Fast_AP < 10/number_of_bins
     """
 
-    def __init__(self, bins=1000) -> None:
+    def __init__(self, bins=1000, recall_thr = 0.40) -> None:
         """Args:
             bins: number of threshold bins for the fast computation of AP
+            recall_thr: compute AP (or AUC) for recall values [0:recall_thr]
         """
+        self.recall_thr = recall_thr
 
         self.sigmoid = nn.Sigmoid()
 
@@ -81,16 +83,14 @@ class MultilabelAveragePrecision(Metric):
         uniq_idx, idx_count = np.unique(idx, return_counts=True)
         self.total_counts[uniq_idx] = np.add(self.total_counts[uniq_idx], idx_count)
 
-    @classmethod
-    def _thresholded_average_precision_score(cls, precision, recall):
+    def _thresholded_average_precision_score(self, precision, recall):
         if len(precision) == 0:
             return 0, -1
-        recall_thr = 0.40
-        index = np.argmin(abs(recall - recall_thr))
+        index = np.argmin(abs(recall - self.recall_thr))
         filtered_precision = precision[:index + 1]
         filtered_recall = recall[:index + 1]
         ap = np.sum(np.diff(np.insert(filtered_recall, 0, 0)) * filtered_precision)
-        return ap, index
+        return ap, index  # index of the value with recall = self.recall_thr (useful for logging)
 
     def get_metric(self, reset: bool = False):
         """
@@ -107,16 +107,16 @@ class MultilabelAveragePrecision(Metric):
         isfinite = np.isfinite(precision)
         precision = precision[isfinite]
         recall = recall[isfinite]
-        ap, index = self._thresholded_average_precision_score(precision, recall)
+        ap, index = self._thresholded_average_precision_score(precision, recall)  # fast AP because of binned values
         if reset:
             fast_ap = ap
-            # ap = average_precision_score(self.gold_labels, self.predictions)
             precision, recall, thresholds = precision_recall_curve(self.gold_labels, self.predictions)
+
             # _thresholded_average_precision_score assumes precision is descending and recall is ascending
             precision = precision[::-1]
             recall = recall[::-1]
             thresholds = thresholds[::-1]
-            ap, index = self._thresholded_average_precision_score(precision, recall)
+            ap, index = self._thresholded_average_precision_score(precision, recall)  # accurate AP because of using all values
             logger.info("Fast AP: %0.4f -- Accurate AP: %0.4f", fast_ap, ap)
             if index >= len(thresholds):
                 logger.info("Index = %d but len(thresholds) = %d. Change index to point to the end of the list.",
@@ -125,7 +125,7 @@ class MultilabelAveragePrecision(Metric):
             logger.info("at index %d/%d (top %%%0.4f) -- threshold: %0.4f",
                         index, len(self.gold_labels), 100.0 * index / len(self.gold_labels), thresholds[index])
 
-            # only keep the top predictions then reverse again for printing
+            # only keep the top predictions then reverse again for printing (to draw the AUC curve)
             precision = precision[:index + 1][::-1]
             recall = recall[:index + 1][::-1]
             thresholds = thresholds[:index + 1][::-1]
@@ -142,7 +142,7 @@ class MultilabelAveragePrecision(Metric):
                     continue
                 skipped = 0
                 next_step += step_size
-                logger.info("%0.4f, %0.4f, %0.4f", p, r, t)
+                # logger.info("%0.4f, %0.4f, %0.4f", p, r, t)
             self.reset()
         return ap
 

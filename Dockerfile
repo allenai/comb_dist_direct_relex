@@ -1,4 +1,4 @@
-FROM python:3.6.4-jessie
+FROM python:3.6.8-stretch
 
 # set env variables
 ENV PATH /usr/local/nvidia/bin/:$PATH
@@ -29,7 +29,7 @@ WORKDIR /work
 # install python packages
 COPY requirements.txt .
 RUN pip install -r requirements.txt
-RUN python -m spacy download en_core_web_md
+# RUN python -m spacy download en_core_web_md
 
 # add the code as the final step so that when we modify the code
 # we don't bust the cached layers holding the dependencies and

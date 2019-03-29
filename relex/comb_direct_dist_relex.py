@@ -5,7 +5,6 @@ from overrides import overrides
 import torch
 from torch import nn
 import numpy as np
-from allennlp.common import Params
 from allennlp.data import Vocabulary
 from allennlp.modules.seq2vec_encoders import CnnEncoder
 from allennlp.models.model import Model
@@ -42,49 +41,44 @@ class CombDirectDistRelex(Model):
         self.attention_weight_fn = attention_weight_fn
         self.attention_aggregation_fn = attention_aggregation_fn
 
-        # embedding_size = 300
-        # self.embed = nn.Embedding(vocab.get_vocab_size(), embedding_size)
-        # zero_vector = [0.0] * embedding_size  # one missing vector for the PADDING token
-        # w = np.load(pretrained_embedding)
-        # pretrained_embedding_weights = np.vstack((zero_vector, w))
-        # assert pretrained_embedding_weights.shape[0] == vocab.get_vocab_size()
-        # assert pretrained_embedding_weights.shape[1] == embedding_size
-        # self.embed.weight = nn.Parameter(torch.Tensor(pretrained_embedding_weights))
-        # self.embed.weight.requires_grad = False
-
-        d = cnn_size
-
+        # instantiate position embedder
         pos_embed_output_size = 5
         pos_embed_input_size = 2 * RelationInstancesReader.max_distance + 1
         self.pos_embed = nn.Embedding(pos_embed_input_size, pos_embed_output_size)
         pos_embed_weights = np.array([range(pos_embed_input_size)] * pos_embed_output_size).T
         self.pos_embed.weight = nn.Parameter(torch.Tensor(pos_embed_weights))
 
-
-        sent_encoder = CnnEncoder
+        d = cnn_size
+        sent_encoder = CnnEncoder  # TODO: should be moved to the config file
         cnn_output_size = d
+        embedding_size = 100  # TODO: should be moved to the config file
 
-        embedding_size = 100
-        self.cnn = sent_encoder(embedding_dim=(embedding_size + 2 * pos_embed_output_size), num_filters=d,
+        # instantiate sentence encoder 
+        self.cnn = sent_encoder(embedding_dim=(embedding_size + 2 * pos_embed_output_size), num_filters=cnn_size,
                                 ngram_filter_sizes=(2, 3, 4, 5),
                                 conv_layer_activation=torch.nn.ReLU(), output_dim=cnn_output_size)
 
+        # dropout after word embedding
         self.dropout = nn.Dropout(p=self.dropout_weight)
-        # self.attention_a = nn.Parameter(torch.randn(cnn_output_size).type(torch.FloatTensor)).cuda()
-        self.register_parameter('attention_a', nn.Parameter(torch.randn(cnn_output_size).type(torch.FloatTensor)))
-        # self.attention_q = nn.Parameter(torch.randn(cnn_output_size).type(torch.FloatTensor)).cuda()
-        self.register_parameter('attention_q', nn.Parameter(torch.randn(cnn_output_size).type(torch.FloatTensor)))
 
+        #  given a sentence, returns its unnormalized attention weight
         self.attention_ff = nn.Sequential(
                 nn.Linear(cnn_output_size, d),
                 nn.ReLU(),
                 nn.Linear(d, 1)
         )
 
+        self.ff_before_alpha = nn.Sequential(
+                nn.Linear(1, 50),
+                nn.ReLU(),
+                nn.Linear(50, 1),
+        )
+
         ff_input_size = cnn_output_size
         if self.with_entity_embeddings:
             ff_input_size += embedding_size
 
+        # output layer
         self.ff = nn.Sequential(
                 nn.Linear(ff_input_size, d),
                 nn.ReLU(),
@@ -92,43 +86,32 @@ class CombDirectDistRelex(Model):
         )
 
         self.loss = torch.nn.BCEWithLogitsLoss()  # sigmoid + binary cross entropy
-        self.metrics: Dict = {}
-        self.metrics['ap'] = MultilabelAveragePrecision()
-        self.metrics['bag_loss'] = Average()
+        self.metrics = {}
+        self.metrics['ap'] = MultilabelAveragePrecision()  # average precision = AUC
+        self.metrics['bag_loss'] = Average()  # to display bag-level loss
 
         if self.sent_loss_weight > 0:
-            self.metrics['sent_loss'] = Average()
-            self.ff_before_alpha = nn.Sequential(
-                    nn.Linear(1, 50),
-                    nn.ReLU(),
-                    nn.Linear(50, 1),
-            )
-
-        self.batch_counter = 0
+            self.metrics['sent_loss'] = Average()  # to display sentence-level loss
 
     @overrides
     def forward(self,  # pylint: disable=arguments-differ
                 mentions: Dict[str, torch.LongTensor],
                 positions1: torch.LongTensor,
                 positions2: torch.LongTensor,
-                sent_labels: torch.LongTensor,
-                is_supervised_bag: torch.LongTensor,
-                labels: torch.LongTensor) -> Dict[str, torch.Tensor]:
+                is_direct_supervision_bag: torch.LongTensor,
+                sent_labels: torch.LongTensor,  # sentence-level labels 
+                labels: torch.LongTensor  # bag-level labels
+                ) -> Dict[str, torch.Tensor]:
 
-        # supervised_bags_count = is_supervised_bag['tokens'].sum().item()
-        # bags_count = is_supervised_bag.size(0)
+        # is all instances in this batch directly or distantly supervised
+        is_direct_supervision_batch = bool(is_direct_supervision_bag['tokens'].shape[1] - 1)
+        if is_direct_supervision_bag['tokens'].shape[1] != 1:
+            direct_supervision_bags_count = sum(is_direct_supervision_bag['tokens'][:, -1] != 0).item()
+            # is it a mix of both ? this affects a single batch because of the sorting_keys in the bucket iterator 
+            if direct_supervision_bags_count != len(is_direct_supervision_bag['tokens'][:, -1] != 0):
+                log.error("Mixed batch with %d supervised bags. Treated as dist. supervised", direct_supervision_bags_count)
 
-        self.batch_counter += 1
-
-        is_supervised_batch = bool(is_supervised_bag['tokens'].shape[1] - 1)
-        if is_supervised_bag['tokens'].shape[1] != 1:
-            supervised_bags_count = sum(is_supervised_bag['tokens'][:, -1] != 0)
-            if supervised_bags_count != len(is_supervised_bag['tokens'][:, -1] != 0):
-                log.error("Mixed batch with %d supervised bags. Treated as dist. supervised", supervised_bags_count)
-
-        tokens_label = 'tokens'
-
-        tokens = mentions[tokens_label]
+        tokens = mentions['tokens']
         assert tokens.dim() == 3
         batch_size = tokens.size(0)
         padded_bag_size = tokens.size(1)
@@ -164,7 +147,8 @@ class CombDirectDistRelex(Model):
         alphas = self.attention_ff(x)
 
         if self.sent_loss_weight > 0:
-            # compute sentence-level loss on the supervised data (if any)
+            
+            # compute sentence-level loss on the directly supervised data (if any)
             sent_labels = sent_labels.unsqueeze(-1)
             # `sent_labels != 2`: directly supervised examples and distantly supervised negative examples
             sent_labels_mask = ((sent_labels != 2).long() * mask[:, :, [0]]).float()
@@ -172,9 +156,8 @@ class CombDirectDistRelex(Model):
             sent_labels_masked_goal = sent_labels_mask * sent_labels.float()
             sent_loss = torch.nn.functional.binary_cross_entropy(sent_labels_masked_pred, sent_labels_masked_goal)
 
-        if self.sent_loss_weight:
-            # apply a small MLP to the attention weights
-            alphas = self.ff_before_alpha(alphas)
+        # apply a small MLP to the attention weights
+        alphas = self.ff_before_alpha(alphas)
 
         # normalize attention weights based on the selected weighting function 
         if self.attention_weight_fn == 'uniform':
@@ -197,17 +180,15 @@ class CombDirectDistRelex(Model):
         if self.attention_aggregation_fn == 'max':
             x = alphas.unsqueeze(-1) * x  # weight sentences
             x = x.max(dim=1)[0]  # max pooling
-        elif self.attention_aggregation_fn == 'max_add':  # TODO: what is this ?
-            x = (x + ((mask[:, :, 0] - 1).float() * 100 +  alphas).unsqueeze(-1)) # weight sentences
-            x = x.max(dim=1)[0]  # max pooling
         elif self.attention_aggregation_fn == 'avg':
-            x = torch.bmm(alphas.unsqueeze(1), sents).squeeze(1)  # average pooling
+            x = torch.bmm(alphas.unsqueeze(1), x).squeeze(1)  # average pooling
         else:
             assert False
 
         if self.with_entity_embeddings:
             # actual bag_size (not padded_bag_size) for each instance in the batch
             bag_size = mask[:, :, 0].sum(dim=1, keepdim=True).float()
+
             e1_mask = (positions1 == 0).long() * mask
             e1_embd = torch.matmul(e1_mask.unsqueeze(2).float(), t_embd)
             e1_embd_sent_sum = e1_embd.squeeze(dim=2).sum(dim=1)
@@ -230,9 +211,9 @@ class CombDirectDistRelex(Model):
 
         if labels is not None:  # Training and evaluation
             w = self.sent_loss_weight / (self.sent_loss_weight + 1)
-            one_minus_w = 1 - w
+            one_minus_w = 1 - w  # weight of the bag-level loss
 
-            if is_supervised_batch and self.sent_loss_weight > 0: #  and not self.with_train_on_supervised:
+            if is_direct_supervision_batch and self.sent_loss_weight > 0:
                 one_minus_w = 0
 
             loss = self.loss(logits, labels.squeeze(-1).type_as(logits)) * self.num_classes  # scale the loss to be more readable

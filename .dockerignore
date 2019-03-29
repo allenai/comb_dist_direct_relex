@@ -1,15 +1,6 @@
 .git
 data
-source_data
 tmp
-word_vectors
 __pycache__
 relex/__pycache__
 tests/__pycache__
-extracted
-error_analysis
-relex/build_dataset.py
-relex/file_util.py
-relex/mentions.py
-relex/umls_util.py
-relex/eval.py

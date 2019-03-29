@@ -1,21 +1,19 @@
 from typing import Set, Tuple, List, Dict
 
 import logging
-import sys
 import random
 from collections import defaultdict
 from overrides import overrides
 
 import tqdm
 
-from allennlp.common import Params
 from allennlp.common.file_utils import cached_path
 from allennlp.data.dataset_readers.dataset_reader import DatasetReader
 from allennlp.data.fields import TextField, ListField, MultiLabelField, SequenceLabelField, LabelField
 from allennlp.data.instance import Instance
 from allennlp.data.tokenizers import WordTokenizer
 from allennlp.data.tokenizers.word_splitter import JustSpacesWordSplitter
-from allennlp.data.token_indexers import SingleIdTokenIndexer, ELMoTokenCharactersIndexer
+from allennlp.data.token_indexers import SingleIdTokenIndexer
 from allennlp.data import Token
 
 log = logging.getLogger(__name__)  # pylint: disable=invalid-name
@@ -37,7 +35,7 @@ class RelationInstancesReader(DatasetReader):
         entity2_text: can be NA because it is not used by the model
         relation_type: use NA to indicate No Relation
         sentence: entity mentions are highlighted with <e1>entity1<\e1> and <e2>entity2<\e2>
-        note: "supervised" to indicate examples with sentence-level supervision. If not, the value is not used.
+        supervision_type: "direct" or "distant"
 
     The reader assumes that the sentences relevant to a pair of entities are all listed consecutively.
     If the entity pair changes, the reader starts a new bag.
@@ -47,14 +45,16 @@ class RelationInstancesReader(DatasetReader):
     max_distance = 30  # for position embeddings
     max_sentence_length = 130 # words
 
-    def __init__(self, lazy: bool = False, max_bag_size: int = 25, negative_exampels_percentage: int = 100,
+    def __init__(self, lazy: bool = False,
+                 max_bag_size: int = 25,
+                 negative_exampels_percentage: int = 100,
                  with_direct_supervision: bool = True) -> None:
         """
         args:
-            mention_count_per_inst: maximum number of mentions per instance
+            lazy: lazy reading of the dataset
+            max_bag_size: maximum number of sentences per a bag
             negative_exampels_percentage: percentage of negative examples to keep
-            min_instances_per_type: ignore relation types with instances < `min_instances_per_type`
-            max_sentence_length: truncate each mention to `max_sentence_length` words
+            with_direct_supervision: keep or ignore direct supervision examples
         """
         super().__init__(lazy=lazy)
         self.max_bag_size = max_bag_size
@@ -63,6 +63,8 @@ class RelationInstancesReader(DatasetReader):
 
         self._tokenizer = WordTokenizer(word_splitter=JustSpacesWordSplitter())
         self._token_indexers = {"tokens": SingleIdTokenIndexer()}
+
+        # for logging and input validation
         self._inst_counts: Dict = defaultdict(int)  # count instances per relation type
         self._pairs: Set = set()  # keep track of pairs of entities
         self._bag_sizes: Dict = defaultdict(int)  # count relation types per bag
@@ -86,20 +88,21 @@ class RelationInstancesReader(DatasetReader):
             # Lines are assumed to be sorted by entity1/entity2/relation_type
             for _, line in enumerate(tqdm.tqdm(data_file.readlines())):
                 line = line.strip()
-                new_e1, new_e2, _, _, rel, m, is_supervised = line.strip().split("\t")
-                if new_e1 != e1 or new_e2 != e2 or is_supervised == 'supervised':
+                new_e1, new_e2, _, _, rel, m, supervision_type = line.strip().split("\t")
+                assert supervision_type in ['direct', 'distant']
+                if new_e1 != e1 or new_e2 != e2 or supervision_type == 'direct':
                     # new entity pair
                     if rels:
                         # subsample negative examples and sentence-level supervised examples
                         if random.randint(1, 100) <= self.negative_exampels_percentage or \
-                           NEGATIVE_RELATION_NAME not in rels or is_supervised == 'supervised':  # pylint: disable=unsupported-membership-test
+                           NEGATIVE_RELATION_NAME not in rels or \
+                           supervision_type == 'direct':  # pylint: disable=unsupported-membership-test
 
-                            if self.with_direct_supervision or is_supervised != 'supervised ':
-                                # fully supervised example (positive and negative ones)
-                                # or 
-                                # positive distantly supervised examples
+                            if not self.with_direct_supervision and supervision_type == 'direct':
+                                pass
+                            else:
                                 inst = self.text_to_instance(e1, e2, rels, mentions, is_predict=False,
-                                                             is_supervised_bag=(is_supervised == 'supervised'))
+                                                             supervision_type=supervision_type)
                                 if inst:
                                     yield inst
 
@@ -112,10 +115,12 @@ class RelationInstancesReader(DatasetReader):
                     rels.add(rel)
                     mentions.add(m)
             if rels:
-                inst = self.text_to_instance(e1, e2, rels, mentions, is_predict=False,
-                                             is_supervised_bag=(is_supervised == 'supervised'))
-                if inst is not None:
-                    yield inst
+                if not self.with_direct_supervision and supervision_type == 'direct':
+                    pass
+                else:
+                    inst = self.text_to_instance(e1, e2, rels, mentions, is_predict=False, supervision_type=supervision_type)
+                    if inst is not None:
+                        yield inst
 
             # log relation types and number of instances
             for rel, cnt in sorted(self._inst_counts.items(), key=lambda x: -x[1]):
@@ -134,20 +139,21 @@ class RelationInstancesReader(DatasetReader):
                          rels: Set[str],
                          mentions: Set[str],
                          is_predict: bool,
-                         is_supervised_bag: bool) -> Instance:
+                         supervision_type: str) -> Instance:
         """Construct an instance given text input.
 
         is_predict: True if this is being called for prediction not training
-        is_supervised_bag: True if this is a bag with sentence-level supervision
+        supervision_type: direct or distant
 
         """
+        assert supervision_type in ['direct', 'distant']
 
-        if (e1, e2) in self._pairs and not is_supervised_bag and not is_predict:
+        if (e1, e2) in self._pairs and supervision_type == 'distant' and not is_predict:
             assert False, "input file is not sorted, check entities %s, %s" % (e1, e2)
         self._pairs.add((e1, e2))
 
         for rel in rels:
-            self._inst_counts[rel] += 1  # keep track of number of instances in each relation type
+            self._inst_counts[rel] += 1  # keep track of number of instances in each relation type for logging
 
         if NEGATIVE_RELATION_NAME in rels:
             if len(rels) > 1:
@@ -183,20 +189,24 @@ class RelationInstancesReader(DatasetReader):
 
         if len(rels) == 0:
             bag_label = 0  # negative bag
-        elif is_supervised_bag:
+        elif supervision_type == 'direct':
             bag_label = 1  # positive bag with sentence-level supervision
         else:
             bag_label = 2  # positive bag distantly supervised
+
         sent_labels = [LabelField(bag_label, skip_indexing=True)] * len(fields_list)
 
-        if is_supervised_bag:
-            is_supervised_bag_field = TextField(self._tokenizer.tokenize(". ."), self._token_indexers)
+        if supervision_type == 'direct':
+            is_direct_supervision_bag_field = TextField(self._tokenizer.tokenize(". ."), self._token_indexers)
         else:
-            is_supervised_bag_field = TextField(self._tokenizer.tokenize("."), self._token_indexers)
-        fields = {"labels": MultiLabelField(rels), "mentions": ListField(list(mention_f)),
-                  "positions1": ListField(list(position1_f)), "positions2": ListField(list(position2_f)),
-                  "sent_labels": ListField(sent_labels),  # 0: -ve, 1: supervised +ve, 2: distantly-supervised +ve
-                  "is_supervised_bag": is_supervised_bag_field# LabelField(is_supervised_bag, skip_indexing=True)
+            is_direct_supervision_bag_field = TextField(self._tokenizer.tokenize("."), self._token_indexers)
+
+        fields = {"mentions": ListField(list(mention_f)),
+                  "positions1": ListField(list(position1_f)),
+                  "positions2": ListField(list(position2_f)),
+                  "is_direct_supervision_bag": is_direct_supervision_bag_field,
+                  "sent_labels": ListField(sent_labels),  # 0: -ve, 1: directly supervised +ve, 2: distantly-supervised +ve
+                  "labels": MultiLabelField(rels),  # bag-level labels
                  }
         return Instance(fields)
 
@@ -269,28 +279,3 @@ class RelationInstancesReader(DatasetReader):
                     next_loc = e_loc[next_loc_index]
 
         return distance_list
-
-    """
-    @classmethod
-    def from_params(cls, params: Params) -> "RelationInstancesReader":
-        lazy = params.pop("lazy", False)
-        mention_count_per_inst = params.pop_int("mention_count_per_inst", sys.maxsize)
-        negative_exampels_percentage = params.pop_int("negative_exampels_percentage", 100)
-        min_instances_per_type = params.pop_int("min_instances_per_type", 0)
-        max_sentence_length = params.pop_int("max_sentence_length", 130)
-        positive_positions = params.pop_bool("positive_positions", True)
-        cap_positions = params.pop_bool("cap_positions", True)
-        binary_classification = params.pop_bool("binary_classification", False)
-        elmo_indexer = params.pop_bool("elmo_indexer", False)
-        supervised = params.pop("supervised", "none")  # optinos: none, all, positive, selected
-        assert supervised in ['none', 'all', 'positive', 'selected']
-        return cls(lazy=lazy, mention_count_per_inst=mention_count_per_inst,
-                   negative_exampels_percentage=negative_exampels_percentage,
-                   min_instances_per_type=min_instances_per_type,
-                   max_sentence_length=max_sentence_length,
-                   positive_positions=positive_positions,
-                   cap_positions=cap_positions,
-                   binary_classification=binary_classification,
-                   elmo_indexer=elmo_indexer,
-                   supervised=supervised)
-    """
