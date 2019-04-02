@@ -70,6 +70,8 @@ class RelationInstancesReader(DatasetReader):
         self._bag_sizes: Dict = defaultdict(int)  # count relation types per bag
         self._relation_coocur: Dict = defaultdict(int)  # count relation types per bag
         self._failed_mentions_count: int = 0  # count mentions with wrong formating
+        self._count_direct_supervised_inst: int = 0
+        self._count_bag_labels: Dict = defaultdict(int)
 
     @overrides
     def _read(self, file_path):
@@ -81,6 +83,8 @@ class RelationInstancesReader(DatasetReader):
             self._bag_sizes = defaultdict(int)  # count relation types per bag
             self._relation_coocur = defaultdict(int)  # count relation types per bag
             self._failed_mentions_count = 0
+            self._count_direct_supervised_inst: int = 0
+            self._count_bag_labels: Dict = defaultdict(int)
             e1 = None
             e2 = None
             rels = None
@@ -194,10 +198,12 @@ class RelationInstancesReader(DatasetReader):
         else:
             bag_label = 2  # positive bag distantly supervised
 
+        self._count_bag_labels[bag_label] += 1
         sent_labels = [LabelField(bag_label, skip_indexing=True)] * len(fields_list)
 
         if supervision_type == 'direct':
             is_direct_supervision_bag_field = TextField(self._tokenizer.tokenize(". ."), self._token_indexers)
+            self._count_direct_supervised_inst += 1
         else:
             is_direct_supervision_bag_field = TextField(self._tokenizer.tokenize("."), self._token_indexers)
 
@@ -241,10 +247,6 @@ class RelationInstancesReader(DatasetReader):
 
         positions1 = self._positions(len(tokens), e1_loc)
         positions2 = self._positions(len(tokens), e2_loc)
-
-        # positions start from zero not -cls.max_distance
-        positions1 = [x + self.max_distance for x in positions1]
-        positions2 = [x + self.max_distance for x in positions2]
 
         return tokens, positions1, positions2
 

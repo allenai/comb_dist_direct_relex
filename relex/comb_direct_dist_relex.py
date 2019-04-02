@@ -51,7 +51,7 @@ class CombDirectDistRelex(Model):
         d = cnn_size
         sent_encoder = CnnEncoder  # TODO: should be moved to the config file
         cnn_output_size = d
-        embedding_size = 100  # TODO: should be moved to the config file
+        embedding_size = 300  # TODO: should be moved to the config file
 
         # instantiate sentence encoder 
         self.cnn = sent_encoder(embedding_dim=(embedding_size + 2 * pos_embed_output_size), num_filters=cnn_size,
@@ -105,6 +105,7 @@ class CombDirectDistRelex(Model):
 
         # is all instances in this batch directly or distantly supervised
         is_direct_supervision_batch = bool(is_direct_supervision_bag['tokens'].shape[1] - 1)
+
         if is_direct_supervision_bag['tokens'].shape[1] != 1:
             direct_supervision_bags_count = sum(is_direct_supervision_bag['tokens'][:, -1] != 0).item()
             # is it a mix of both ? this affects a single batch because of the sorting_keys in the bucket iterator 
@@ -120,7 +121,7 @@ class CombDirectDistRelex(Model):
 
         # embed text
         t_embd = self.text_field_embedder(mentions)
-  
+
         # embed position information
         p1_embd = self.pos_embed(positions1)
         p2_embd = self.pos_embed(positions2)
@@ -147,7 +148,6 @@ class CombDirectDistRelex(Model):
         alphas = self.attention_ff(x)
 
         if self.sent_loss_weight > 0:
-            
             # compute sentence-level loss on the directly supervised data (if any)
             sent_labels = sent_labels.unsqueeze(-1)
             # `sent_labels != 2`: directly supervised examples and distantly supervised negative examples
@@ -156,7 +156,7 @@ class CombDirectDistRelex(Model):
             sent_labels_masked_goal = sent_labels_mask * sent_labels.float()
             sent_loss = torch.nn.functional.binary_cross_entropy(sent_labels_masked_pred, sent_labels_masked_goal)
 
-        # apply a small MLP to the attention weights
+        # apply a small FF to the attention weights
         alphas = self.ff_before_alpha(alphas)
 
         # normalize attention weights based on the selected weighting function 
