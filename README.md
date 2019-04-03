@@ -1,5 +1,5 @@
 # Combining Distant and Direct Supervision for Neural Relation Extraction
-This is code for our NAACL 2019 paper on cobmidning direct and distant supervision to improve relation extraction. 
+This is code for our NAACL 2019 paper on combining direct and distant supervision to improve relation extraction. 
 
 ### Running The Code
 After cloning this repository, follow the steps below to run training and prediction.
