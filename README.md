@@ -1,15 +1,15 @@
 # Combining Distant and Direct Supervision for Neural Relation Extraction
-This is code for our NAACL 2019 paper on combining direct and distant supervision to improve relation extraction. 
+This is code for our NAACL 2019 paper on combining direct and distant supervision to improve relation extraction. The code is implemented using PyTorch and AllenNLP. 
 
 ### Running The Code
-After cloning this repository, follow the steps below to run training and prediction.
+After cloning this repository, follow the steps below for training and prediction.
 
-First, install the requirements which mainly contain AllenNLP
+First, install the requirements (mainly AllenNLP)
 ```
 pip install -r requirements.txt
 ```
 
-Use the following scrip to start training. Make sure to check and edit the parameters in the training script. The default parameters will train the model for one epoch on a subset of the dataset. 
+Use the following scrip to start training. Make sure to check and edit the parameters in the training script. The default parameters will train the model for **one epoch** on a **subset of the dataset**. 
 ```
 ./scripts/train.sh serialization_dir
 ```
