@@ -1,4 +1,3 @@
-pytest
 pylint
-mypy
+pytest
 allennlp

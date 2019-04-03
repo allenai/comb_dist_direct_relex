@@ -10,8 +10,8 @@ export NUMPY_SEED=$NUMPY_SEED
 
 
 # change the following two variables to make the problem smaller for debugging
-export negative_exampels_percentage=100 # Values < 100 will randomely drop some of the negative examples
-export max_bag_size=25  # keep only the top `max_bag_size` sentences in each bag and drop the rest
+export negative_exampels_percentage=1 # set to 100 to use all of the dataset. Values < 100 will randomely drop some of the negative examples
+export max_bag_size=2  # set to 25 to use all of the dataset. Keep only the top `max_bag_size` sentences in each bag and drop the rest
 
 
 # reader configurations
@@ -30,6 +30,8 @@ export attention_aggregation_fn=max  # avg, max
 
 # trainer configurations
 export batch_size=128
+export cuda_device=0  # which GPU to use. Use -1 for no-gpu
+export num_epochs=1  # set to 100 and rely on early stopping
 
 
 allennlp train $config_file --include-package relex -s $1 $2

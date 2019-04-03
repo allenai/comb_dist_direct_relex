@@ -39,7 +39,7 @@
     "cache_instances": true
   },
   "trainer": {
-    "num_epochs": 100,
+    "num_epochs": std.parseInt(std.extVar("num_epochs")),
     "cuda_device": std.parseInt(std.extVar("cuda_device")),
     "grad_clipping": 5.0,
     "patience": 3,

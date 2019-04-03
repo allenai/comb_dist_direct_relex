@@ -31,7 +31,6 @@ class CombDirectDistRelex(Model):
                  attention_aggregation_fn: str = 'max') -> None:
         regularizer = None
         super().__init__(vocab, regularizer)
-        self.output_alphas = False  # set to True at decoding
         self.num_classes = self.vocab.get_vocab_size("labels")
 
         self.text_field_embedder = text_field_embedder
@@ -205,10 +204,6 @@ class CombDirectDistRelex(Model):
         logits = self.ff(x)  # batch_size x self.num_classes
         output_dict = {'logits': logits}  # sigmoid is applied in the loss function and the metric class, not here
 
-        if self.output_alphas:  # for prediction
-            if alphas is not None:
-                output_dict['alphas'] = alphas.data.cpu().numpy().tolist()
-
         if labels is not None:  # Training and evaluation
             w = self.sent_loss_weight / (self.sent_loss_weight + 1)
             one_minus_w = 1 - w  # weight of the bag-level loss
@@ -231,16 +226,15 @@ class CombDirectDistRelex(Model):
     @overrides
     def decode(self, output_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         prob_thr = 0.6  # to ignore predicted labels with low prob. 
-        self.output_alphas = True  # TODO: this is not working for the first call
-
         probs = torch.sigmoid(output_dict['logits'])
-        labels_count = 0
-        for i, p in enumerate(probs.squeeze().cpu().data.numpy()):
-            if p > prob_thr:  # ignore predictions with low prob.
-                output_dict[self.vocab.get_token_from_index(i, namespace="labels")] = torch.Tensor([float(p)])
-                labels_count += 1
-        output_dict['labels_count'] = torch.Tensor([labels_count])
-        del output_dict['logits']
+        output_dict['labels'] = []
+        for row in probs.cpu().data.numpy():
+            labels = []
+            for i, p in enumerate(row):
+                if p > prob_thr:  # ignore predictions with low prob.
+                    labels.append((self.vocab.get_token_from_index(i, namespace="labels"), float(p)))
+                    # output_dict[self.vocab.get_token_from_index(i, namespace="labels")] = torch.Tensor([float(p)])
+            output_dict['labels'].append(labels)
         del output_dict['loss']
         return output_dict
 
