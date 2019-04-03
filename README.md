@@ -4,7 +4,7 @@ This is code for our NAACL 2019 paper on combining direct and distant supervisio
 ### Running The Code
 After cloning this repository, follow the steps below for training and prediction.
 
-1) install requirements (mainly AllenNLP)
+1) Install requirements (mainly AllenNLP)
 ```
 pip install -r requirements.txt
 ```
