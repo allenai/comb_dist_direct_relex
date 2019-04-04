@@ -9,19 +9,12 @@ After cloning this repository, follow the steps below for training and predictio
 pip install -r requirements.txt
 ```
 
-2) Download training data
-```
-mkdir data
-wget -P data/ https://s3-us-west-2.amazonaws.com/ai2-s2-research/relex/data/freebase.tar.gz
-tar -xvf data/freebase.tar.gz -C data/
-```
-
-3) Use the following scrip to start training. Make sure to check and edit the parameters in the training script. The default parameters will train the model for **one epoch** on a **subset of the dataset**. 
+2) Use the following scrip to start training. Make sure to check and edit the parameters in the training script. The default parameters will train the model for **one epoch** on a **subset of the dataset**.
 ```
 ./scripts/train.sh serialization_dir
 ```
 
-4) To run the trained model for prediction, 
+3) To run the trained model for prediction,
 ```
 allennlp predict serialization_dir/model.tar.gz tests/fixtures/data.txt --include-package relex --cuda-device 0 --batch-size 32 --use-dataset-reader --predictor relex --output-file predictions.json
 ```

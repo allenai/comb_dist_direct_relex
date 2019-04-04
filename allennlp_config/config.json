@@ -14,7 +14,7 @@
   "test_data_path": "https://s3-us-west-2.amazonaws.com/ai2-s2-research/relex/data/freebase/test.txt",
   "evaluate_on_test": true,
   "model": {
-    "type": "comb_direct_dist_relex",
+    "type": "comb_dist_direct_relex",
     "text_field_embedder": {
       "token_embedders": {
         "tokens": {

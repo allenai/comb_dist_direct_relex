@@ -18,8 +18,8 @@ from relex.relation_instances_reader import RelationInstancesReader
 log = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
 
-@Model.register("comb_direct_dist_relex")
-class CombDirectDistRelex(Model):
+@Model.register("comb_dist_direct_relex")
+class CombDistDirectRelex(Model):
 
     def __init__(self, vocab: Vocabulary,
                  text_field_embedder: TextFieldEmbedder,
